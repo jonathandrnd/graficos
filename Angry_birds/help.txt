@@ -1,0 +1,8 @@
+help.txt
+
+Hold the bird with mouse to pull it and sling it
++ and - to zoom in and zoom out
+Arrow keys to navigate(pan)
+Hit pigs to score
+Obstacles are movable
+
