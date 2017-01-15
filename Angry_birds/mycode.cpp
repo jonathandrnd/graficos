@@ -4,10 +4,9 @@
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <map>
 
-//#include <GL/gl.h>
-//#include <GL/glu.h>
-
+#include <ft2build.h>
 #include "glad/glad.h"
 #include <GLFW/glfw3.h>
 
@@ -16,6 +15,7 @@
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/transform.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -23,6 +23,10 @@
 #include <mpg123.h>
 #include <unistd.h>
 #include <signal.h>
+#include <GL/gl.h>
+#include <GL/glu.h>
+
+#include "Shader.h"
 
 #define GAME_BIRD 0
 #define GAME_WOOD_VERTICAL 1
@@ -58,7 +62,9 @@ class VAO {
 		VAO(){
 		}
 };
-//typedef struct VAO VAO;
+typedef struct VAO VAO;
+
+GLuint xVAO, xVBO;
 
 struct GLMatrices {
 	glm::mat4 projection;
@@ -68,13 +74,20 @@ struct GLMatrices {
 	GLuint TexMatrixID; // For use with texture shader
 } Matrices;
 
-struct FTGLFont {
-	FTFont* font;
-	GLuint fontMatrixID;
-	GLuint fontColorID;
-} GL3Font;
+struct Character {
+    GLuint TextureID;   // ID handle of the glyph texture
+    glm::ivec2 Size;    // Size of glyph
+    glm::ivec2 Bearing;  // Offset from baseline to left/top of glyph
+    GLuint Advance;    // Horizontal offset to advance to next glyph
+};
 
-GLuint programID, fontProgramID, textureProgramID;;
+
+std::map<GLchar, Character> Characters;
+GLuint programID, fontProgramID, textureProgramID;
+int lives=4;
+
+
+string tos(int t){stringstream st;st<<t;return st.str();}
 
 /* Function to load Shaders - Use it as it is */
 GLuint LoadShaders(const char * vertex_file_path,const char * fragment_file_path) {
@@ -153,39 +166,16 @@ GLuint LoadShaders(const char * vertex_file_path,const char * fragment_file_path
 	return ProgramID;
 }
 
-static void error_callback(int error, const char* description)
-{
+static void error_callback(int error, const char* description){
 	fprintf(stderr, "Error: %s\n", description);
 }
 
-void quit(GLFWwindow *window)
-{
+void quit(GLFWwindow *window){
 	glfwDestroyWindow(window);
 	glfwTerminate();
 	kill(pid,SIGKILL);
 	exit(EXIT_SUCCESS);
 }
-
-glm::vec3 getRGBfromHue (int hue)
-{
-	float intp;
-	float fracp = modff(hue/60.0, &intp);
-	float x = 1.0 - abs((float)((int)intp%2)+fracp-1.0);
-
-	if (hue < 60)
-		return glm::vec3(1,x,0);
-	else if (hue < 120)
-		return glm::vec3(x,1,0);
-	else if (hue < 180)
-		return glm::vec3(0,1,x);
-	else if (hue < 240)
-		return glm::vec3(0,x,1);
-	else if (hue < 300)
-		return glm::vec3(x,0,1);
-	else
-		return glm::vec3(1,0,x);
-}
-
 
 /* Generate VAO, VBOs and return VAO handle */
 VAO* create3DObject (GLenum primitive_mode, int numVertices, int type, const GLfloat* vertex_buffer_data, const GLfloat* color_buffer_data, double centerx, double centery, double radius, GLenum fill_mode )
@@ -374,7 +364,8 @@ int keyboard_pressed_statex = 0, keyboard_pressed_statey = 0;
 double curx,cury,initx = -380,inity = 130,speedx,speedy,strength=0.5,prevx,prevy,cannonball_size=18,gravity=0.2;
 double fireposx=-380,fireposy=130, keyboardx = -380 , keyboardy = 130;
 double pivotx=-10,pivoty=-30,angular_v[6],angle[6],woodspx[6],woodspy[6],pigspx[10], pigspy[10], piginitx[10];
-VAO  *cannonball, *gameFloor, *woodlogs[6], *pigs[10], *powerboard, *powerelement, *background, *catapult;
+VAO  *cannonball[2], *gameFloor, *woodlogs[6], *pigs[10], *powerboard, *powerelement, *background, *catapult;
+int poscannonball=0;
 float screenleft = -600.0f, screenright = 600.0f, screentop = -300.0f, screenbotton = 300.0f;
 int scoretimer[10][3],tim=5;
 int pig_wood[10];
@@ -385,8 +376,7 @@ int score = 0;
 double power = 0;
 /* Executed when a regular key is pressed/released/held-down */
 /* Prefered for Keyboard events */
-void keyboard (GLFWwindow* window, int key, int scancode, int action, int mods)
-{
+void keyboard (GLFWwindow* window, int key, int scancode, int action, int mods){
 	// Function is called first on GLFW_PRESS.
 
 	if (action == GLFW_RELEASE) {
@@ -547,9 +537,9 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 }
 
 int is_cannon_clicked(double mousex, double mousey) {
-	double x2=cannonball->centerx;
-	double y2=cannonball->centery;
-	double radius = cannonball->radius;
+	double x2=cannonball[poscannonball]->centerx;
+	double y2=cannonball[poscannonball]->centery;
+	double radius = cannonball[poscannonball]->radius;
 	if(radius>sqrt((x2-mousex)*(x2-mousex)+(y2-mousey)*(y2-mousey)))
 		return true;
 	else
@@ -562,13 +552,16 @@ void mouseButton (GLFWwindow* window, int button, int action, int mods)
 	switch (button) {
 		case GLFW_MOUSE_BUTTON_LEFT:
 			if (action == GLFW_PRESS){
-				//triangle_rot_dir *= -1;
-				if(pressed_state==0&&is_cannon_clicked(curx,cury))
-				{	
+				//mover el bird de la catapulta			
+				if(pressed_state==0&&is_cannon_clicked(curx,cury)){
 					initx=curx,inity=cury;
+					lives=max(lives-1,0);
 					pressed_state=1;
+					
 				}
 			}
+
+			//hacer un click para que el bird regrese a su posicion inicial
 			if(pressed_state==3){
 				pressed_state=0;
 				gravity = 0.2;
@@ -576,6 +569,8 @@ void mouseButton (GLFWwindow* window, int button, int action, int mods)
 				keyboardx = fireposx;
 				keyboardy = fireposy;
 			}
+
+			//enfocar al juego, que se encuentre activo
 			if (action == GLFW_RELEASE ){
 				//triangle_rot_dir *= -1;
 				if(pressed_state==1){
@@ -846,9 +841,9 @@ void createPig ()
 	pig_wood[3] = 1;
 	pig_wood[1] = 2;
 }
+
 // Creates the rectangle object used in this sample code
-void createCannonball ()
-{
+void createCannonball (){
 	// GL3 accepts only Triangles. Quads are not supported
 	double n=20;
 	static GLfloat vertex_buffer_data[9*20 + 2*3 + 2*9*20 + 9*20];
@@ -933,8 +928,101 @@ void createCannonball ()
 	vertex_buffer_data[9*20*3+7] = -cannonball_size*sin((360.0f/n) *M_PI/180.0f);
 	vertex_buffer_data[9*20*3+8] = 0;
 	// create3DObject creates and returns a handle to a VAO that can be used later
-	cannonball = create3DObject(GL_TRIANGLES, 3*n*3 + 2*3, GAME_BIRD, vertex_buffer_data, color_buffer_data,  0, 0, cannonball_size, GL_FILL);
+	cannonball[0] = create3DObject(GL_TRIANGLES, 3*n*3 + 2*3, GAME_BIRD, vertex_buffer_data, color_buffer_data,  0, 0, cannonball_size, GL_FILL);
 }
+
+
+
+// Creates the rectangle object used in this sample code
+void createCannonball2 (){
+	cannonball_size=40;
+	// GL3 accepts only Triangles. Quads are not supported
+	double n=20;
+	static GLfloat vertex_buffer_data[9*20 + 2*3 + 2*9*20 + 9*20];
+	static GLfloat color_buffer_data [9*20 + 2*3 + 2*9*20 +9*20];
+	float angle=0;
+	for(int i=0;i<n;i++){
+		vertex_buffer_data[9*i] = vertex_buffer_data[9*i+1] = vertex_buffer_data[9*i+2] = 0;
+		vertex_buffer_data[9*i+3]=cannonball_size*cos(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+4]=cannonball_size*sin(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+5]=0;
+		angle += 360.0f/n;
+		vertex_buffer_data[9*i+6]=cannonball_size*cos(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+7]=cannonball_size*sin(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+8]=0;
+
+		color_buffer_data[9*i] = 255.0f/255.0f;
+		color_buffer_data[9*i+1] = 255.0f/255.0f;
+		color_buffer_data[9*i+2] = 0.0f/255.0f;
+		color_buffer_data[9*i+3] = 255.0f/255.0f;
+		color_buffer_data[9*i+4] = 255.0f/255.0f;
+		color_buffer_data[9*i+5] = 0.0f/255.0f;
+		color_buffer_data[9*i+6] = 255.0f/255.0f;
+		color_buffer_data[9*i+7] = 255.0f/255.0f;
+		color_buffer_data[9*i+8] = 0.0f/255.0f;
+	}
+	angle= 0;
+	for(int i=n;i<n+n;i++){
+		vertex_buffer_data[9*i] =5; vertex_buffer_data[9*i+1] =-2; vertex_buffer_data[9*i+2] = 0;
+		vertex_buffer_data[9*i+3]=5+cannonball_size*0.25*cos(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+4]=-2+cannonball_size*0.5*sin(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+5]=0;
+		angle += 360.0f/(n);
+		vertex_buffer_data[9*i+6]=5+cannonball_size*0.25*cos(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+7]=-2+cannonball_size*0.5*sin(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+8]=0;
+
+		color_buffer_data[9*i] = 1;
+		color_buffer_data[9*i+1] = 1;
+		color_buffer_data[9*i+2] = 1;
+		color_buffer_data[9*i+3] = 1;
+		color_buffer_data[9*i+4] = 1;
+		color_buffer_data[9*i+5] = 1;
+		color_buffer_data[9*i+6] = 1;
+		color_buffer_data[9*i+7] = 1;
+		color_buffer_data[9*i+8] = 1;
+	}
+	angle =0 ;
+	for(int i=2*n;i<2*n+n;i++){
+		vertex_buffer_data[9*i] = 5;vertex_buffer_data[9*i+1] =0; vertex_buffer_data[9*i+2] = 0;
+		vertex_buffer_data[9*i+3]=5+0.15*cannonball_size*cos(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+4]=0.15*cannonball_size*sin(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+5]=0;
+		angle += 360.0f/n;
+		vertex_buffer_data[9*i+6]=5+0.15*cannonball_size*cos(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+7]=0.15*cannonball_size*sin(angle*M_PI/180.0f);
+		vertex_buffer_data[9*i+8]=0;
+
+		color_buffer_data[9*i] = 0;
+		color_buffer_data[9*i+1] = 0;
+		color_buffer_data[9*i+2] = 0;
+		color_buffer_data[9*i+3] = 0;
+		color_buffer_data[9*i+4] = 0;
+		color_buffer_data[9*i+5] = 0;
+		color_buffer_data[9*i+6] = 0;
+		color_buffer_data[9*i+7] = 0;
+		color_buffer_data[9*i+8] = 0;
+	}
+
+	for(int i=9*3*n;i<9*(3*n+2);i+=3){
+		color_buffer_data[i] =252.0f/255.0f;
+		color_buffer_data[i+1] = 187.0f/255.0f;
+		color_buffer_data[i+2] = 35.0f/255.0f;
+	}
+
+	vertex_buffer_data[9*20*3] = cannonball_size*cos((360.0f/n) *M_PI/180.0f);
+	vertex_buffer_data[9*20*3+1] = cannonball_size*sin((360.0f/n) *M_PI/180.0f);
+	vertex_buffer_data[9*20*3+2] = 0;
+	vertex_buffer_data[9*20*3+3] = cannonball_size+10;
+	vertex_buffer_data[9*20*3+4] = -2;
+	vertex_buffer_data[9*20*3+5] = 0;
+	vertex_buffer_data[9*20*3+6] = cannonball_size*cos((360.0f/n) *M_PI/180.0f);
+	vertex_buffer_data[9*20*3+7] = -cannonball_size*sin((360.0f/n) *M_PI/180.0f);
+	vertex_buffer_data[9*20*3+8] = 0;
+	// create3DObject creates and returns a handle to a VAO that can be used later
+	cannonball[1] = create3DObject(GL_TRIANGLES, 3*n*3 + 2*3, GAME_BIRD, vertex_buffer_data, color_buffer_data,  0, 0, cannonball_size, GL_FILL);
+}
+
 
 void createGameFloor ()
 {
@@ -1078,6 +1166,149 @@ void createtemp(){
 	temp = create3DObject(GL_TRIANGLES, 3 ,GAME_WOOD_HORIZONTAL, vertex_buffer_data, color_buffer_data, 50, 200, 0, GL_FILL);
 }
 
+
+void RenderText(Shader &shader, std::string text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color){
+    // Activate corresponding render state	
+    shader.Use();
+    glUniform3f(glGetUniformLocation(shader.Program, "textColor"), color.x, color.y, color.z);
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(xVAO);
+
+    // Iterate through all characters
+    std::string::const_iterator c;
+    for (c = text.begin(); c != text.end(); c++) 
+    {
+        Character ch = Characters[*c];
+
+        GLfloat xpos = x + ch.Bearing.x * scale;
+        GLfloat ypos = y - (ch.Size.y - ch.Bearing.y) * scale;
+
+        GLfloat w = ch.Size.x * scale;
+        GLfloat h = ch.Size.y * scale;
+        // Update VBO for each character
+        GLfloat vertices[6][4] = {
+            { xpos,     ypos + h,   0.0, 0.0 },            
+            { xpos,     ypos,       0.0, 1.0 },
+            { xpos + w, ypos,       1.0, 1.0 },
+
+            { xpos,     ypos + h,   0.0, 0.0 },
+            { xpos + w, ypos,       1.0, 1.0 },
+            { xpos + w, ypos + h,   1.0, 0.0 }           
+        };
+        // Render glyph texture over quad
+        glBindTexture(GL_TEXTURE_2D, ch.TextureID);
+        // Update content of VBO memory
+        glBindBuffer(GL_ARRAY_BUFFER, xVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices); // Be sure to use glBufferSubData and not glBufferData
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        // Render quad
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        // Now advance cursors for next glyph (note that advance is number of 1/64 pixels)
+        x += (ch.Advance >> 6) * scale; // Bitshift by 6 to get value in pixels (2^6 = 64 (divide amount of 1/64th pixels by 64 to get amount of pixels))
+    }
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+
+
+
+Shader initShaderText(){
+    glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  
+
+    // Compile and setup the shader
+    Shader shader("shaders/text.vs", "shaders/text.frag");
+    glm::mat4 projection = glm::ortho(0.0f, static_cast<GLfloat>(1200), 0.0f, static_cast<GLfloat>(600));
+    shader.Use();
+    glUniformMatrix4fv(glGetUniformLocation(shader.Program, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
+    // FreeType
+    FT_Library ft;
+    // All functions return a value different than 0 whenever an error occurred
+    if (FT_Init_FreeType(&ft))
+        std::cout << "ERROR::FREETYPE: Could not init FreeType Library" << std::endl;
+
+    // Load font as face
+    FT_Face face;
+    if (FT_New_Face(ft, "arial.ttf", 0, &face))
+        std::cout << "ERROR::FREETYPE: Failed to load font" << std::endl;
+
+    // Set size to load glyphs as
+    FT_Set_Pixel_Sizes(face, 0, 48);
+
+    // Disable byte-alignment restriction
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); 
+
+    // Load first 128 characters of ASCII set
+    for (GLubyte c = 0; c < 128; c++){
+        // Load character glyph 
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER)){
+            std::cout << "ERROR::FREETYTPE: Failed to load Glyph" << std::endl;
+            continue;
+        }
+        // Generate texture
+        GLuint texture;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            GL_RED,
+            face->glyph->bitmap.width,
+            face->glyph->bitmap.rows,
+            0,
+            GL_RED,
+            GL_UNSIGNED_BYTE,
+            face->glyph->bitmap.buffer
+        );
+        // Set texture options
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // Now store character for later use
+        Character character = {
+            texture,
+            glm::ivec2(face->glyph->bitmap.width, face->glyph->bitmap.rows),
+            glm::ivec2(face->glyph->bitmap_left, face->glyph->bitmap_top),
+            face->glyph->advance.x
+        };
+        Characters.insert(std::pair<GLchar, Character>(c, character));
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    // Destroy FreeType once we're finished
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
+
+	
+    // Configure VAO/VBO for texture quads
+    glGenVertexArrays(1, &xVAO);
+    glGenBuffers(1, &xVBO);
+    glBindVertexArray(xVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, xVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 6 * 4, NULL, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+	Matrices.projection = glm::ortho(screenleft, screenright, screenbotton, screentop, 1.0f, 500.0f);
+	Matrices.view = glm::lookAt(glm::vec3(0,0,3), glm::vec3(0,0,0), glm::vec3(0,1,0));
+ 	glm::mat4 VP = Matrices.projection * Matrices.view;
+	Matrices.model = glm::mat4(1.0f);
+ 	glm::mat4 scaletext =  glm::scale(
+								glm::mat4(0.5f),
+							    glm::vec3(1.0f,-1.0f,0.0f));
+	Matrices.model*=scaletext;
+	glm::mat4 MVP = VP * Matrices.model;
+	glUniformMatrix4fv(Matrices.TexMatrixID, 1, GL_FALSE, &MVP[0][0]);
+
+	return shader;
+}
+
+
 void draw ()
 {
 	// clear the color and depth in the frame buffer
@@ -1143,8 +1374,8 @@ void draw ()
 	int cnt = 0;
 	for(int i=0;i<6;i++){
 		if(!pigs[i]->dead){
-			double x1 = cannonball->centerx,y1 = cannonball->centery, x2 = pigs[i]->centerx, y2 = pigs[i]->centery;
-			if(pigs[i]->radius + cannonball->radius > sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1))){
+			double x1 = cannonball[poscannonball]->centerx,y1 = cannonball[poscannonball]->centery, x2 = pigs[i]->centerx, y2 = pigs[i]->centery;
+			if(pigs[i]->radius + cannonball[poscannonball]->radius > sqrt((x2-x1)*(x2-x1)+(y2-y1)*(y2-y1))){
 				pigs[i]->dead = 1;
 				scoretimer[i][0] = pigs[i]->centerx; 
 				scoretimer[i][1] = pigs[i]->centery; 
@@ -1332,9 +1563,17 @@ void draw ()
 	glm::mat4 rotateRectangle; // rotate about vector (-1,1,1)
 	if(pressed_state==0 && keyboard_pressed_statex == 0 && keyboard_pressed_statey == 0){
 		translateRectangle = glm::translate (glm::vec3(fireposx, fireposy, 0));        // glTranslatef
-		cannonball->centerx = fireposx;
-		cannonball->centery = fireposy;
-		cannonball->radius = cannonball_size;
+		//cout<<"iniciooooo "<<lives<<endl;
+		cannonball[poscannonball]->centerx = fireposx;
+		cannonball[poscannonball]->centery = fireposy;
+		cannonball[poscannonball]->radius = cannonball_size;
+
+		if(lives<=2){
+			poscannonball=1;
+			cannonball[poscannonball]->centerx = fireposx;
+			cannonball[poscannonball]->centery = fireposy;
+			cannonball[poscannonball]->radius = cannonball_size;
+		}	
 	}
 	else if(pressed_state==1 || keyboard_pressed_statex == 1 || keyboard_pressed_statey == 1){
 		if(sqrt((curx-initx)*(curx-initx)+(cury-inity)*(cury-inity)) > 70){
@@ -1344,26 +1583,26 @@ void draw ()
 		}
 		power = sqrt((curx-initx)*(curx-initx) + (cury-inity)*(cury-inity));
 		translateRectangle = glm::translate (glm::vec3(curx, cury, 0));        // glTranslatef
-		cannonball->centerx = curx;
-		cannonball->centery = cury;
-		cannonball->radius = cannonball_size;
+		cannonball[poscannonball]->centerx = curx;
+		cannonball[poscannonball]->centery = cury;
+		cannonball[poscannonball]->radius = cannonball_size;
 	}
 	else {
 		translateRectangle = glm::translate (glm::vec3(initx, inity, 0));        // glTranslatef
-		cannonball->centerx = initx;
-		cannonball->centery = inity;
-		cannonball->radius = cannonball_size;
+		cannonball[poscannonball]->centerx = initx;
+		cannonball[poscannonball]->centery = inity;
+		cannonball[poscannonball]->radius = cannonball_size;
 	}
-	if(collision_state == 0 && cannonball->centerx >= -10 - cannonball_size && cannonball->centerx <= -10 + 20 + cannonball_size && cannonball->centery >= 140 - cannonball_size ){
+	if(collision_state == 0 && cannonball[poscannonball]->centerx >= -10 - cannonball_size && cannonball[poscannonball]->centerx <= -10 + 20 + cannonball_size && cannonball[poscannonball]->centery >= 140 - cannonball_size ){
 		collision_state=1;
 		angle[0] = 0.1;
 		angular_v[0] = speedx*0.2;
-		if(cannonball->centerx > 10){
+		if(cannonball[poscannonball]->centerx > 10){
 			pivotx = 10;
 			angle[0] = -0.1;
 			angular_v[0] = -speedx*0.2;
 		}
-		if(cannonball->centery < 140 && cannonball->centerx > -10 - cannonball_size/2 && (cannonball->centerx < 10 + cannonball_size/2)){
+		if(cannonball[poscannonball]->centery < 140 && cannonball[poscannonball]->centerx > -10 - cannonball_size/2 && (cannonball[poscannonball]->centerx < 10 + cannonball_size/2)){
 			speedy = -0.5*speedy;
 			inity = 140 - cannonball_size - 1;
 		}
@@ -1373,9 +1612,9 @@ void draw ()
 	}
 
 	for(int i=1;i<=5;i++){
-		double x = cannonball->centerx,y = cannonball->centery;
+		double x = cannonball[poscannonball]->centerx,y = cannonball[poscannonball]->centery;
 		if(x >= woodlogs[i]->centerx - woodsizex[i] - cannonball_size && x <= woodlogs[i]->centerx + woodsizex[i] + cannonball_size && y >= woodlogs[i]->centery - woodsizey[i] - cannonball_size && y <= woodlogs[i]->centery + woodsizey[i]) {
-			if(cannonball->centery < woodlogs[i]->centery - woodsizey[i] && cannonball->centerx > woodlogs[i]->centerx - woodsizex[i] - cannonball_size/2 ){
+			if(cannonball[poscannonball]->centery < woodlogs[i]->centery - woodsizey[i] && cannonball[poscannonball]->centerx > woodlogs[i]->centerx - woodsizex[i] - cannonball_size/2 ){
 				speedy = -0.25*speedy, speedx = 0.25*speedx;
 				inity = woodlogs[i]->centery - woodsizey[i] - cannonball_size - 1;
 			}
@@ -1405,7 +1644,7 @@ void draw ()
 	glUniformMatrix4fv(Matrices.MatrixID, 1, GL_FALSE, &MVP[0][0]);
 
 	// draw3DObject draws the VAO given to it using current MVP matrix
-	draw3DObject(cannonball);
+	draw3DObject(cannonball[poscannonball]);
 
 
 	//Displaying power
@@ -1449,55 +1688,19 @@ void draw ()
 		}
 	}
 
-	//Rendering score
-	
-	// Render font on screen
-	static int fontScale = 1;
-	float fontScaleValue = 50 + 0.25*sinf(fontScale*M_PI/180.0f);
-	glm::vec3 fontColor = glm::vec3(228.0f/255.0f,142.0f/255.0f,57.0f/255.0f);//getRGBfromHue (fontScale);
-				
-
-
-
-	// Use font Shaders for next part of code
-	glUseProgram(fontProgramID);
-	Matrices.view = glm::lookAt(glm::vec3(0,0,3), glm::vec3(0,0,0), glm::vec3(0,1,0)); // Fixed camera for 2D (ortho) in XY plane
-
-	// Transform the text
-	Matrices.model = glm::mat4(1.0f);
-	glm::mat4 translateText = glm::translate(glm::vec3(400,-250,0));
-	glm::mat4 scaleText = glm::scale(glm::vec3(fontScaleValue,fontScaleValue,fontScaleValue));
-	glm::mat4 rotateText = glm::rotate((float)M_PI, glm::vec3(1,0,0));
-	Matrices.model *= (translateText * scaleText * rotateText);
-	MVP = Matrices.projection * Matrices.view * Matrices.model;
-	// send font's MVP and font color to fond shaders
-	glUniformMatrix4fv(GL3Font.fontMatrixID, 1, GL_FALSE, &MVP[0][0]);
-	glUniform3fv(GL3Font.fontColorID, 1, &fontColor[0]);
-	
 	score = cnt * 100;
-	//string str = to_string(score);
-	char str[10];
-	sprintf(str,"SCORE: %d",score);
-	// Render font
-	GL3Font.font->Render(str);
-	for(int i=0;i<6;i++){
-		if(scoretimer[i][3]>0){
-			Matrices.model = glm::mat4(1.0f);
-			//cout<<scoretimer[i][0]<<" "<<scoretimer[i][1]<<endl;
-			glm::mat4 translateText = glm::translate(glm::vec3(400,0,0));
-			Matrices.model *=  ( translateText *scaleText * rotateText);
-			MVP = Matrices.projection * Matrices.view * Matrices.model;
-			glUniformMatrix4fv(GL3Font.fontMatrixID, 1, GL_FALSE, &MVP[0][0]);
-			glUniform3fv(GL3Font.fontColorID, 1, &fontColor[0]);
-	//		GL3Font.font->Render("100");
-		}
-	}
+	Shader shader=initShaderText();
+	string initextscore="Score: ";
+	string initextlives="Lives: ";
+
+	RenderText(shader, initextscore+tos(score), 350.0f, 250.0f, 0.5f, glm::vec3(0.8f, 0.5f, 0.6f));
+	RenderText(shader, initextlives+tos(lives), -550.0f, 265.0f, 0.5f, glm::vec3(1.0f, 0.0f, 0.0f));
+	glDisable(GL_BLEND);
 }
 
 /* Initialise glfw window, I/O callbacks and the renderer to use */
 /* Nothing to Edit here */
-GLFWwindow* initGLFW (int width, int height)
-{
+GLFWwindow* initGLFW (int width, int height){
 	GLFWwindow* window; // window desciptor/handle
 
 	glfwSetErrorCallback(error_callback);
@@ -1545,8 +1748,7 @@ GLFWwindow* initGLFW (int width, int height)
 
 /* Initialize the OpenGL rendering properties */
 /* Add all the models to be created here */
-void initGL (GLFWwindow* window, int width, int height)
-{
+void initGL (GLFWwindow* window, int width, int height){
 	// Load Textures
 	// Enable Texture0 as current texture memory
 	glActiveTexture(GL_TEXTURE0);
@@ -1570,6 +1772,7 @@ void initGL (GLFWwindow* window, int width, int height)
 	// Generate the VAO, VBOs, vertices data & copy into the array buffer
 	createBackground (textureID);
 	createCannonball ();
+	createCannonball2 ();
 	createGameFloor ();
 	createWoodLogs();
 	createPig();
@@ -1577,6 +1780,7 @@ void initGL (GLFWwindow* window, int width, int height)
 	createPowerElement();
 	createCatapult();
 	createtemp();
+
 	//createCatapult2();
 
 	// Create and compile our GLSL program from the shaders
@@ -1595,45 +1799,18 @@ void initGL (GLFWwindow* window, int width, int height)
 	glDepthFunc (GL_LEQUAL);
 	
 	// Initialise FTGL stuff
-	//const char* fontfile = "UpsideDown.ttf";
-	const char* fontfile = "arial.ttf";
-	GL3Font.font = new FTExtrudeFont(fontfile); // 3D extrude style rendering
-
-	if(GL3Font.font->Error())
-	{
-		cout << "Error: Could not load font `" << fontfile << "'" << endl;
-		glfwTerminate();
-		exit(EXIT_FAILURE);
-	}
-
-	// Create and compile our GLSL program from the font shaders
-	fontProgramID = LoadShaders( "fontrender.vert", "fontrender.frag" );
-	GLint fontVertexCoordAttrib, fontVertexNormalAttrib, fontVertexOffsetUniform;
-	fontVertexCoordAttrib = glGetAttribLocation(fontProgramID, "vertexPosition");
-	fontVertexNormalAttrib = glGetAttribLocation(fontProgramID, "vertexNormal");
-	fontVertexOffsetUniform = glGetUniformLocation(fontProgramID, "pen");
-	GL3Font.fontMatrixID = glGetUniformLocation(fontProgramID, "MVP");
-	GL3Font.fontColorID = glGetUniformLocation(fontProgramID, "fontColor");
-
-	//GL3Font.font->ShaderLocations(fontVertexCoordAttrib, fontVertexNormalAttrib, fontVertexOffsetUniform);
-	GL3Font.font->FaceSize(1);
-	GL3Font.font->Depth(0);
-	GL3Font.font->Outset(0, 0);
-	GL3Font.font->CharMap(ft_encoding_unicode);
-
 	cout << "VENDOR: " << glGetString(GL_VENDOR) << endl;
 	cout << "RENDERER: " << glGetString(GL_RENDERER) << endl;
 	cout << "VERSION: " << glGetString(GL_VERSION) << endl;
 	cout << "GLSL: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << endl;
 }
 
-int main (int argc, char** argv)
-{
+int main (int argc, char** argv){
+
 	int width = 1200;
 	int height = 600;
 
 	GLFWwindow* window = initGLFW(width, height);
-
 	initGL (window, width, height);
 
 	double last_update_time = glfwGetTime(), current_time;
@@ -1695,6 +1872,7 @@ int main (int argc, char** argv)
 	/* Draw in loop */
 	while (!glfwWindowShouldClose(window)) {
 
+		
 		if(panleft == 1 && screenleft >= -600 + 5){
 			screenleft -= 5;
 			screenright -= 5;
@@ -1731,8 +1909,21 @@ int main (int argc, char** argv)
 		if(zoominstate == 1 || zoomoutstate == 1 || panleft == 1 || panright == 1 || panup == 1 || pandown == 1)
 			reshapeWindow(window, width, height);
 		// OpenGL Dramands
+
 		draw();
 
+
+		/*
+		reshapeWindow(window, width, height);
+
+        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);		
+		RenderText(shader, "This is sample text", 25.0f, 25.0f, 1.0f, glm::vec3(0.5, 0.8f, 0.2f));
+        RenderText(shader, "(C) LearnOpenGL.com", 200.0f, 200.0f, 0.5f, glm::vec3(0.3, 0.7f, 0.9f));
+*/
+		for(int i=0;i<3000000;i++)4;
+
+		
 		// Swap Frame Buffer in double buffering
 		glfwSwapBuffers(window);
 
