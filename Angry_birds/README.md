@@ -1,6 +1,4 @@
-A 2D game like Angry birds made using OpenGL3
-
-Run make, it should compile the source
+3D game like Angry birds made using OpenGL4
 
 Additional libraries required: 
 * SOIL for texture rendering
@@ -8,5 +6,5 @@ Additional libraries required:
 * Combination used is GLFW + GLAD + GLM
 * A03 and MPG123 for playing sound
 
-
+This project have been improved and now is a 3D game.
 ![Alt text](screenshot.png?raw=true "Screenshot")
